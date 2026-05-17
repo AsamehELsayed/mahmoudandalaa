@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+    <defs>
+        <linearGradient id="njm-grad" x1="0%" y1="100%" x2="100%" y2="0%">
+            <stop offset="0%" stop-color="#f59e0b" />
+            <stop offset="100%" stop-color="#f43f5e" />
+        </linearGradient>
+    </defs>
+    <!-- Background rounded square with premium smooth corners (rx=8 for 32x32 is matching rounded-lg aspect) -->
+    <rect width="32" height="32" rx="8" fill="url(#njm-grad)" />
+    <!-- Beautifully centered and scaled four-pointed star (NJM Solutions logo icon) -->
+    <path d="M16 8L18.64 13.36L24 16L18.64 18.64L16 24L13.36 18.64L8 16L13.36 13.36Z" fill="#ffffff" />
+</svg>
