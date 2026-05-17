@@ -50,44 +50,104 @@ export default function Welcome({ settings, guests, wishes }: WelcomeProps) {
 
   useEffect(() => {
     let isMounted = true;
-    let loaded = 0;
+    let isFinished = false; // Flag to prevent duplicate transition and preloading
     const newUrls = { ...DEFAULT_VIDEOS };
+    const abortController = new AbortController();
 
-    const loadVideo = (key: keyof typeof DEFAULT_VIDEOS, src: string) => {
-      return new Promise<void>((resolve) => {
-        // Fetch to cache the video in blob, to avoid buffering
-        fetch(src)
-          .then(res => res.blob())
-          .then(blob => {
-            if (isMounted) {
-              newUrls[key] = URL.createObjectURL(blob);
-              loaded++;
-              setLoadProgress(Math.floor((loaded / 3) * 100));
-              resolve();
-            }
-          })
-          .catch(() => {
-            if (isMounted) {
-              loaded++;
-              setLoadProgress(Math.floor((loaded / 3) * 100));
-              resolve(); // fallback to original url if fetch fails
-            }
-          });
-      });
+    const fetchVideoWithProgress = async (
+      key: keyof typeof DEFAULT_VIDEOS,
+      src: string,
+      onProgress?: (percent: number) => void
+    ) => {
+      try {
+        const response = await fetch(src, { signal: abortController.signal });
+        if (!response.ok) throw new Error('Network response was not ok');
+
+        const contentLength = response.headers.get('Content-Length');
+        const totalBytes = contentLength ? parseInt(contentLength, 10) : 0;
+        
+        const reader = response.body?.getReader();
+        if (!reader) throw new Error('ReadableStream not supported');
+
+        let receivedBytes = 0;
+        const chunks: Uint8Array[] = [];
+
+        while (isMounted) {
+          const { done, value } = await reader.read();
+          if (done) break;
+
+          chunks.push(value);
+          receivedBytes += value.length;
+
+          if (totalBytes > 0 && onProgress) {
+            const percent = Math.min(99, Math.floor((receivedBytes / totalBytes) * 100));
+            onProgress(percent);
+          }
+        }
+
+        if (!isMounted) return;
+
+        const blob = new Blob(chunks, { type: 'video/mp4' });
+        newUrls[key] = URL.createObjectURL(blob);
+        setVideoUrls({ ...newUrls });
+      } catch (err) {
+        if (err instanceof Error && err.name === 'AbortError') {
+          console.log(`Fetch aborted for ${key}`);
+        } else {
+          console.warn(`Fallback to progressive streaming for ${key}:`, err);
+        }
+      }
     };
 
-    Promise.all([
-      loadVideo('envelope', DEFAULT_VIDEOS.envelope),
-      loadVideo('terrace', DEFAULT_VIDEOS.terrace),
-      loadVideo('descend', DEFAULT_VIDEOS.descend)
-    ]).then(() => {
-      if (isMounted) {
-        setVideoUrls(newUrls);
-        setTimeout(() => setViewState('idle'), 800);
+    const handleTransitionToIdle = () => {
+      if (isFinished) return;
+      isFinished = true;
+      clearTimeout(timeoutId);
+      setLoadProgress(100);
+      setTimeout(() => {
+        if (isMounted) {
+          setViewState('idle');
+          preloadRemainingVideos();
+        }
+      }, 500);
+    };
+
+    // Safety Timeout (3 seconds): Bypasses loading if download is too slow
+    const timeoutId = setTimeout(() => {
+      if (isMounted && !isFinished) {
+        console.log('Video download timed out. Falling back to native progressive streaming.');
+        abortController.abort(); // Cancel the fetch to save bandwidth
+        handleTransitionToIdle();
+      }
+    }, 3000);
+
+    // Helper to load subsequent videos in the background
+    const preloadRemainingVideos = () => {
+      fetchVideoWithProgress('terrace', DEFAULT_VIDEOS.terrace)
+        .then(() => {
+          if (isMounted) {
+            fetchVideoWithProgress('descend', DEFAULT_VIDEOS.descend);
+          }
+        });
+    };
+
+    // Start loading first video (envelope) immediately
+    fetchVideoWithProgress('envelope', DEFAULT_VIDEOS.envelope, (percent) => {
+      if (isMounted && !isFinished) {
+        setLoadProgress(percent);
+      }
+    })
+    .then(() => {
+      if (isMounted && !isFinished) {
+        handleTransitionToIdle();
       }
     });
 
-    return () => { isMounted = false; };
+    return () => {
+      isMounted = false;
+      clearTimeout(timeoutId);
+      abortController.abort();
+    };
   }, []);
 
   // Use database guests
